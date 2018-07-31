@@ -44,7 +44,7 @@ import Control.Applicative ((<$>))
 import Control.Concurrent
 import qualified Control.Concurrent.Async as Async
 import Control.Concurrent.STM
-import Control.Exception (bracketOnError)
+import Control.Exception (bracketOnError, catch)
 import Control.Monad (void, forever, filterM)
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Loops (untilJust)
@@ -60,6 +60,7 @@ import Data.Text (Text)
 import Data.Word (Word16)
 import Network
 import System.IO (Handle, hLookAhead)
+import System.IO.Error (isEOFError)
 import System.Timeout (timeout)
 
 import Network.MQTT.Types
@@ -75,6 +76,7 @@ data Terminated
     = ParseFailed [String] String
     -- ^ at the context in @['String']@ with the given message.
     | ConnectFailed ConnectError
+    | EOF
     | UserRequested
     -- ^ 'disconnect' was called
     deriving Show
@@ -216,9 +218,15 @@ type SendSignal = MVar ()
 mainLoop :: Config -> Handle -> WaitTerminate -> SendSignal -> IO Terminated
 mainLoop mqtt h waitTerminate sendSignal = do
     void $ forkMQTT waitTerminate $ keepAliveLoop mqtt sendSignal
-    evalStateT
-      (handshake >>= maybe (liftIO (cLogDebug mqtt "Connected") >> go) return)
-      (MqttState (parse message) BS.empty [])
+    catch
+      (evalStateT
+        (handshake >>= maybe (liftIO (cLogDebug mqtt "Connected") >> go) return)
+        (MqttState (parse message) BS.empty [])
+      )
+      (\e -> case e of
+          _ | isEOFError e -> return EOF
+          _ | otherwise    -> liftIO $ putStrLn "Uncaught exception" >> ioError e
+      )
   where
     go = do
       input <- waitForInput mqtt h
