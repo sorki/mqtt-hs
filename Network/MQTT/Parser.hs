@@ -239,4 +239,4 @@ toQoS :: (Num a, Eq a, Show a, Monad m) => a -> m QoS
 toQoS 0 = return NoConfirm
 toQoS 1 = return Confirm
 toQoS 2 = return Handshake
-toQoS x = fail $ "Invalid QoS value: " ++ show x
+toQoS x = error $ "Invalid QoS value: " ++ show x
